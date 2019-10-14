@@ -12,6 +12,14 @@ def format_forex_data(source, target, refreshDate, value):
 
     return formatted_data
 
+def format_stock_data(stockname, price, previous_close, change_pct):
+    
+    hyperlink_value = """[%s](https://finance.yahoo.com/quote/%s/)""" % (price, stockname)
+
+    formatted_data = """#### Stock Query Results \n| Symbol  | Price   | Previous Close | PCT Change |\n|:--------|:--------:|:------------------|:------|\n| %s      | %s       | %s                | %s    |""" % (stockname, hyperlink_value, previous_close, change_pct)
+
+    return formatted_data
+
 def get_forex_data(source, target):
     r = requests.get("https://www.alphavantage.co/query?function=CURRENCY_EXCHANGE_RATE&from_currency=%s&to_currency=%s&apikey=F657FR56IL7YYX7G" % (source, target))
 
@@ -25,6 +33,26 @@ def get_forex_data(source, target):
         'text': formatted_data,
         'username' : "Forex Service",
         'icon_url' : "https://cdn2.iconfinder.com/data/icons/accounting-auditors-1/66/80-512.png"
+        }
+
+    response_json = json.dumps(response_dict)
+    
+    return response_json
+
+def get_stock_data(stockname):
+    r = requests.get("https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=%s&apikey=F657FR56IL7YYX7G" % stockname)
+
+    json_result = json.loads(r.text)
+    price = json_result.get("Global Quote").get("05. price")
+    previous_close = json_result.get("Global Quote").get("08. previous close")
+    change_pct = json_result.get("Global Quote").get("10. change percent")
+
+    formatted_data = format_stock_data(stockname, price, previous_close, change_pct)
+
+    response_dict = {
+        'text': formatted_data,
+        'username' : "Stock Service",
+        'icon_url' : "https://cdn0.iconfinder.com/data/icons/computing-3/66/candles_diagram_stock_price_climb_2-256.png"
         }
 
     response_json = json.dumps(response_dict)
@@ -56,21 +84,54 @@ def forex():
     args = request.args
     queryText = ""
 
-    if "text" in args:
-        queryText = args["text"]
+    if request.method == "POST":
+        content_text = request.get_json()['text']
+        (_, source, target) = content_text.split()
 
-    if len(queryText) == 0:
-        source = "GBP"
-        target = "EUR"
     else:
-        (source, target) = queryText.split()
+
+        if "text" in args:
+            queryText = args["text"]
+
+        if len(queryText) == 0:
+            source = "GBP"
+            target = "EUR"
+        else:
+            (source, target) = queryText.split()
     
     forex_data = get_forex_data(source.upper(), target.upper())
 
-    if request.method == "POST":
-        return "this is a POST request"
-
     resp = make_response(forex_data)
+    resp.headers['Content-Type'] = 'application/json'
+
+    return resp
+
+@app.route('/stock', methods=["GET","POST"])
+def stocks():
+
+    args = request.args
+    queryText = ""
+    if request.method == "POST":
+        content_text = request.get_json()['text']
+        (_, stock) = content_text.split()
+
+    else:
+
+        if "text" in args:
+            queryText = args["text"]
+
+        if len(queryText) == 0:
+            stock = "MSFT"
+        else:
+            stock = queryText
+        
+    stock_data = get_stock_data(stock.upper())
+
+    if request.method == "POST":
+        print("POST data")
+        print(stock_data)
+
+    resp = make_response(stock_data)
     resp.headers['Content-Type'] = 'application/json'
 
     return resp
