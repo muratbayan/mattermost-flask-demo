@@ -3,6 +3,7 @@ from flask import request
 from flask import make_response
 import requests
 import json
+import random
 
 def format_forex_data(source, target, refreshDate, value):
     
@@ -16,7 +17,28 @@ def format_stock_data(stockname, price, previous_close, change_pct):
     
     hyperlink_value = """[%s](https://finance.yahoo.com/quote/%s/)""" % (price, stockname)
 
-    formatted_data = """#### Stock Query Results \n| Symbol  | Price   | Previous Close | PCT Change |\n|:--------|:--------:|:------------------|:------|\n| %s      | %s       | %s                | %s    |""" % (stockname, hyperlink_value, previous_close, change_pct)
+    change_value = float(change_pct.strip('%'))/100
+
+    if change_value < -0.05:
+        change_symbol = ":arrow_double_down: "
+    elif change_value < 0:
+        change_symbol = ":arrow_down_small: "
+    elif change_value > 0.05:
+        change_symbol = ":arrow_double_up: "
+    elif change_value > 0:
+        change_symbol = ":arrow_up_small: "
+    else:
+        change_symbol = ""
+
+
+
+    formatted_data = """#### Stock Query Results \n| Symbol  | Price   | Previous Close | PCT Change |\n|:--------|:--------:|:------------------|:------|\n| %s      | %s       | %s                | %s    |""" % (stockname, hyperlink_value, previous_close, change_symbol + change_pct)
+
+    return formatted_data
+
+def format_holiday_data(holidaycount):
+
+    formatted_data = """#### Holiday Allowance Overview \n| Allowance | Used   | Remaining |\n|:----------|:------:|:-----------|\n| 25      | %s       | %s                |""" % (holidaycount, 25 - holidaycount)
 
     return formatted_data
 
@@ -53,6 +75,18 @@ def get_stock_data(stockname):
         'text': formatted_data,
         'username' : "Stock Service",
         'icon_url' : "https://cdn0.iconfinder.com/data/icons/computing-3/66/candles_diagram_stock_price_climb_2-256.png"
+        }
+
+    response_json = json.dumps(response_dict)
+    
+    return response_json
+
+def get_holiday_data(holiday_count):
+    formatted_data = format_holiday_data(holiday_count)
+
+    response_dict = {
+        'text': formatted_data,
+        'username' : "Holiday Service"
         }
 
     response_json = json.dumps(response_dict)
@@ -132,6 +166,18 @@ def stocks():
         print(stock_data)
 
     resp = make_response(stock_data)
+    resp.headers['Content-Type'] = 'application/json'
+
+    return resp
+
+@app.route('/holiday', methods=["GET"])
+def holiday():
+
+    holiday_count = random.randrange(25)
+
+    holiday_data = get_holiday_data(holiday_count)
+
+    resp = make_response(holiday_data)
     resp.headers['Content-Type'] = 'application/json'
 
     return resp
