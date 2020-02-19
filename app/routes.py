@@ -4,6 +4,8 @@ from flask import make_response
 import requests
 import json
 import random
+import pandas as pd
+import ast
 
 def format_forex_data(source, target, refreshDate, value):
     
@@ -12,6 +14,37 @@ def format_forex_data(source, target, refreshDate, value):
     formatted_data = """#### Forex Query Results \n| Source  | Target   | Last Refresh Date | Value |\n|:--------|:--------:|:------------------|:------|\n| %s      | %s       | %s                | %s    |""" % (source, target, refreshDate, hyperlink_value)
 
     return formatted_data
+
+def format_jira_data(input_data, command, jira_argument):
+    
+    formatted_jira_project_header = """#### JIRA Stats for Project Key - %s\n| Issue Type   | Status | Count |\n|:--------|:--------|:------------------:|\n""" % jira_argument
+    formatted_jira_project_row = """| %s       | %s                | %s    |\n"""
+
+    formatted_jira_sprint_header = """#### JIRA Stats for Sprint - %s\n| Assignee  |Issue Type   | Status | Count |\n|:--------|:--------|:--------|:------------------:|\n""" % jira_argument
+    formatted_jira_sprint_row = """|%s       | %s       | %s                | %s    |\n"""
+
+    formatted_data = ""
+    
+    if command == "PROJECT":
+        formatted_data = formatted_jira_project_header
+    elif command == "SPRINT":
+        formatted_data = formatted_jira_sprint_header
+    
+    json_data = json.loads(input_data)
+    print(json_data)
+
+    if command =="PROJECT":
+        for json_row in json_data['fields.project.name']:
+            (project_name, issue_type) = ast.literal_eval(json_row)
+            formatted_data = formatted_data + (formatted_jira_project_row % (project_name, issue_type, json_data['fields.project.name'][json_row]))
+    elif command =="SPRINT":
+        for json_row in json_data['fields.project.name']:
+            print(json_row)
+            (project_name, issue_type, assignee_name) = ast.literal_eval(json_row)
+            formatted_data = formatted_data + (formatted_jira_sprint_row % (assignee_name, project_name, issue_type, json_data['fields.project.name'][json_row]))
+
+    return formatted_data
+
 
 def format_stock_data(stockname, price, previous_close, change_pct):
     
@@ -29,8 +62,6 @@ def format_stock_data(stockname, price, previous_close, change_pct):
         change_symbol = ":arrow_up_small: "
     else:
         change_symbol = ""
-
-
 
     formatted_data = """#### Stock Query Results \n| Symbol  | Price   | Previous Close | PCT Change |\n|:--------|:--------:|:------------------|:------|\n| %s      | %s       | %s                | %s    |""" % (stockname, hyperlink_value, previous_close, change_symbol + change_pct)
 
@@ -105,6 +136,61 @@ def get_forex_data2(source, target):
     formatted_response_content = """{"text": "%s"}""" % formatted_data
     return formatted_response_content
 
+def get_jira_data(command, jira_argument):
+
+    #request_url = f"https://mattermost.atlassian.net/rest/api/3/search?jql=(project="{project_name}" AND reporter="dennis.kittrell")
+    project_request_url = f"https://mattermost.atlassian.net/rest/api/3/search?jql=(project=\"{jira_argument}\")&maxResults=100"
+    sprint_request_url = f"https://mattermost.atlassian.net/rest/api/3/search?jql=(sprint={jira_argument})&maxResults=100"
+    # sprint_paging_request_url = f"https://mattermost.atlassian.net/rest/api/3/search?jql=(sprint={jira_argument})&maxResults=100"
+    
+    json_result = {}
+
+    # print(jira_argument)
+
+    if command == "PROJECT":
+        r = requests.get(project_request_url, auth=('murat.bayan@mattermost.com', "zSSClPdwa4xsGGSKam6N32FF"))
+        json_result = json.loads(r.text)
+        # print(json_result)
+
+        # if total_results > 100:
+        # project_paging_request_url = f"https://mattermost.atlassian.net/rest/api/3/search?jql=(project=\"{jira_argument}\")&maxResults=100&startAt={}"
+
+
+    elif command == "SPRINT":
+        r = requests.get(sprint_request_url, auth=('murat.bayan@mattermost.com', "zSSClPdwa4xsGGSKam6N32FF"))
+        json_result = json.loads(r.text)
+    
+    # print(json_result)
+    
+    issues = json_result["issues"]
+    normalized_issues = pd.json_normalize(issues)
+    # print(normalized_issues)
+    # print(normalized_issues.columns)
+
+    formatted_data = ""
+
+    if command == "PROJECT":
+        issues_dataframe = normalized_issues[['fields.issuetype.name','fields.project.name', 'fields.status.name']]
+        issue_stats_df = issues_dataframe.groupby(['fields.issuetype.name', 'fields.status.name']).count()
+        formatted_data = format_jira_data(issue_stats_df.to_json(), command, jira_argument)
+    elif command == "SPRINT":
+        issues_dataframe = normalized_issues[['fields.issuetype.name','fields.project.name', 'fields.status.name', 'fields.assignee.displayName']]
+        issue_stats_df = issues_dataframe.groupby(['fields.issuetype.name', 'fields.status.name', 'fields.assignee.displayName']).count()
+        formatted_data = format_jira_data(issue_stats_df.to_json(), command, jira_argument)
+
+
+
+    response_dict = {
+        'text': formatted_data,
+        'username' : "JIRA Stats Service",
+        'icon_url' : "https://cdn4.iconfinder.com/data/icons/logos-brands-5/24/jira-512.png"
+        }
+
+    response_json = json.dumps(response_dict)
+    
+    return response_json
+
+
 #def create_mattermost_response(inputData):
 #    resp = make_response()
 
@@ -172,12 +258,37 @@ def stocks():
 
 @app.route('/holiday', methods=["GET"])
 def holiday():
-
     holiday_count = random.randrange(25)
-
     holiday_data = get_holiday_data(holiday_count)
 
     resp = make_response(holiday_data)
+    resp.headers['Content-Type'] = 'application/json'
+
+    return resp
+
+@app.route('/jira', methods=["GET","POST"])
+def jira():
+    args = request.args
+    queryText = ""
+
+    if request.method == "POST":
+        content_text = request.get_json()['text']
+        (_, command, jira_argument) = content_text.split()
+
+    else:
+
+        if "text" in args:
+            queryText = args["text"]
+
+        if len(queryText) == 0:
+            command = "project"
+            jira_argument = "CR"
+        else:
+            (command, jira_argument) = queryText.split()
+    
+    formatted_jira_data = get_jira_data(command.upper(), jira_argument.upper())
+
+    resp = make_response(formatted_jira_data)
     resp.headers['Content-Type'] = 'application/json'
 
     return resp
